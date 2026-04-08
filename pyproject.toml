@@ -1,7 +1,7 @@
 [project]
-name = "my-agent"
+name = "async-rust-lsp-agent"
 version = "0.1.0"
-description = "Claude Agent SDK project with Bedrock auth"
+description = "Agent that builds and iterates on the async-rust-lsp server"
 requires-python = ">=3.12"
 dependencies = [
     "claude-agent-sdk>=0.1.48",
@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-my-agent = "agent_template.main:main"
+async-rust-lsp-agent = "agent_template.main:main"
 
 [build-system]
 requires = ["hatchling"]
