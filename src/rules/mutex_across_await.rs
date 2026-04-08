@@ -97,6 +97,13 @@ fn analyze_block(block: Node, source: &[u8], diagnostics: &mut Vec<Diagnostic>) 
                     check_await_in_expr(value, source, &guards, diagnostics);
                 }
 
+                // If this let shadows an existing guard name, the old guard
+                // is implicitly dropped (Rust ownership move/drop semantics).
+                if let Some(pattern) = stmt.child_by_field_name("pattern") {
+                    let name = node_text(pattern, source);
+                    guards.retain(|g| g.name != name);
+                }
+
                 // Then register this binding as a new guard if applicable.
                 // Order matters: scan first so the new binding doesn't flag
                 // against its own `.await`.
@@ -478,6 +485,19 @@ async fn good() {
 }
 "#;
         assert_eq!(diag_count(src), 0, "should not flag guard dropped before await");
+    }
+
+    #[test]
+    fn no_diagnostic_when_guard_shadowed_before_await() {
+        let src = r#"
+async fn good() {
+    let guard = mutex.lock().await;
+    let value = *guard;
+    let guard = 42;
+    some_future().await;
+}
+"#;
+        assert_eq!(diag_count(src), 0, "should not flag after guard name is shadowed");
     }
 
     #[test]
