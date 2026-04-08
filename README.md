@@ -10,34 +10,123 @@ Existing Rust tooling has a blind spot for tokio-specific async antipatterns:
 - **rust-analyzer** has no plugin system for custom diagnostics
 - **Runtime tools** (tokio-console) only help during execution, not during editing
 
-This LSP fills the gap with real-time editor feedback for async lock patterns, blocking operations in async contexts, and other tokio-specific footguns.
+This LSP fills the gap with real-time editor feedback for async lock patterns.
 
-## Goals
+## Current rules
 
-### Diagnostics
+### `async-rust/mutex-across-await`
 
-- **tokio-mutex-across-await**: Warn when `tokio::sync::Mutex`/`RwLock` guards are held across `.await` points
-- **blocking-in-async**: Detect `std::thread::sleep`, `std::fs::*`, and other blocking calls inside async functions
-- **nested-lock-ordering**: Flag potential deadlocks from inconsistent lock acquisition order
-- **unbounded-channel-in-loop**: Warn about unbounded channel sends in hot loops
+Warns when `tokio::sync::Mutex` or `RwLock` guards are held across `.await` points — a pattern that can deadlock under tokio's cooperative scheduling.
 
-### LSP Features
+```rust
+// BAD — guard lives across the await
+let guard = mutex.lock().await;
+do_something(&guard);
+some_future.await; // WARNING: deadlock risk
 
-- `textDocument/publishDiagnostics` — real-time warnings as you type
-- `textDocument/codeAction` — quick fixes (scope the guard, clone Arc, use `spawn_blocking`)
-- Incremental parsing via `tree-sitter-rust` for fast feedback
+// OK — guard scoped before the await
+let value = {
+    let guard = mutex.lock().await;
+    guard.clone()
+};
+some_future.await; // fine
+```
 
-### Integration
+The rule tracks guard liveness through:
+- `drop(guard)` calls (including inside conditional branches)
+- `let` shadowing that kills the guard binding
+- Block scoping (guard dropped at end of block)
 
-- Works with any LSP-compatible editor (VS Code, Zed, Neovim, Helix)
-- **Claude Code** consumes LSP diagnostics automatically — diagnostics appear in agent context
-- Configurable via `.async-rust-lsp.toml` per project
+## Installation
 
-## Architecture (aspirational)
+```bash
+cargo install --git https://github.com/rgbkrk/async-rust-lsp
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/rgbkrk/async-rust-lsp
+cd async-rust-lsp
+cargo build --release
+# binary at ./target/release/async-rust-lsp
+```
+
+## Editor setup
+
+### Neovim (nvim-lspconfig)
+
+```lua
+local lspconfig = require('lspconfig')
+local configs = require('lspconfig.configs')
+
+if not configs.async_rust_lsp then
+  configs.async_rust_lsp = {
+    default_config = {
+      cmd = { 'async-rust-lsp' },
+      filetypes = { 'rust' },
+      root_dir = lspconfig.util.root_pattern('Cargo.toml'),
+    },
+  }
+end
+
+lspconfig.async_rust_lsp.setup {}
+```
+
+### VS Code
+
+Use a generic LSP client extension and add to `.vscode/settings.json`:
+
+```json
+{
+  "lsp-client.servers": [
+    {
+      "name": "async-rust-lsp",
+      "command": "async-rust-lsp",
+      "filetypes": ["rust"]
+    }
+  ]
+}
+```
+
+### Zed
+
+Add to `~/.config/zed/settings.json`:
+
+```json
+{
+  "lsp": {
+    "async-rust-lsp": {
+      "binary": {
+        "path": "async-rust-lsp"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude lsp add --name async-rust-lsp --command async-rust-lsp
+```
+
+Diagnostics appear automatically in Claude's context when editing `.rs` files.
+
+## Logging
+
+The server logs to `$TMPDIR/async-rust-lsp.log` (never stdout/stderr, which are reserved for LSP stdio protocol).
+
+```bash
+tail -f "$TMPDIR/async-rust-lsp.log"
+RUST_LOG=debug async-rust-lsp  # verbose logging
+```
+
+## Architecture
 
 ```
 ┌─────────────┐    LSP/stdio    ┌──────────────────┐
-│   Editor    │ ◄─────────────► │  async-rust-lsp  │
+│   Editor    │ <─────────────> │  async-rust-lsp  │
 │ (or Claude) │                 │                  │
 └─────────────┘                 │  tree-sitter-rust│
                                 │  + custom rules  │
@@ -47,7 +136,6 @@ This LSP fills the gap with real-time editor feedback for async lock patterns, b
 Built with:
 - [`tower-lsp`](https://github.com/ebkalderon/tower-lsp) — async LSP framework
 - [`tree-sitter-rust`](https://github.com/tree-sitter/tree-sitter-rust) — incremental Rust parser
-- Custom rule engine for async pattern matching
 
 ## Origin
 
