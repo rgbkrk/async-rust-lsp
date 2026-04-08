@@ -72,7 +72,7 @@ fn walk_blocks(node: Node, source: &[u8], diagnostics: &mut Vec<Diagnostic>) {
 }
 
 /// A guard binding discovered in a block.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct GuardBinding {
     /// Name bound by the `let` statement (e.g. `guard`, `lock`)
     name: String,
@@ -246,7 +246,12 @@ fn check_await_in_expr(
     visit_awaits(expr_node, source, guards, diagnostics);
 }
 
-fn visit_awaits(node: Node, source: &[u8], guards: &[GuardBinding], diagnostics: &mut Vec<Diagnostic>) {
+fn visit_awaits(
+    node: Node,
+    source: &[u8],
+    guards: &[GuardBinding],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     if node.kind() == "await_expression" {
         // Only flag awaits that come *after* the guard bindings (by byte offset)
         let await_start = node.start_byte();
@@ -269,7 +274,9 @@ fn visit_awaits(node: Node, source: &[u8], guards: &[GuardBinding], diagnostics:
             diagnostics.push(Diagnostic {
                 range: node_to_range(node),
                 severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String("async-rust/mutex-across-await".to_string())),
+                code: Some(NumberOrString::String(
+                    "async-rust/mutex-across-await".to_string(),
+                )),
                 code_description: None,
                 source: Some("async-rust-lsp".to_string()),
                 message,
@@ -283,15 +290,59 @@ fn visit_awaits(node: Node, source: &[u8], guards: &[GuardBinding], diagnostics:
         return;
     }
 
-    // Recurse into nested blocks so that outer-scope guards are checked
-    // against `.await` expressions inside if/match/loop/bare-block bodies.
-    // Each nested block is also analyzed independently by walk_blocks() with
-    // its own guard list, but that won't duplicate diagnostics since inner
-    // analyze_block() starts with an empty guard set.
+    // When we encounter a block node (e.g. if/match/loop body), walk its
+    // children sequentially so we can track drop() and shadowing within
+    // that branch. This eliminates false positives when a guard is dropped
+    // before an await inside the same conditional branch.
+    if node.kind() == "block" {
+        visit_awaits_in_block(node, source, guards, diagnostics);
+        return;
+    }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         visit_awaits(child, source, guards, diagnostics);
+    }
+}
+
+/// Walk a block node's children in order, tracking `drop()` calls and `let`
+/// shadowing against the (outer) guard set. This allows `drop(guard)` inside
+/// an `if` branch to kill the guard's liveness for subsequent awaits in that
+/// same branch, while leaving other branches unaffected.
+fn visit_awaits_in_block(
+    block: Node,
+    source: &[u8],
+    outer_guards: &[GuardBinding],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut guards = outer_guards.to_vec();
+
+    let mut cursor = block.walk();
+    for stmt in block.children(&mut cursor) {
+        match stmt.kind() {
+            "let_declaration" => {
+                // Check the RHS for awaits against current guard set
+                if let Some(value) = stmt.child_by_field_name("value") {
+                    visit_awaits(value, source, &guards, diagnostics);
+                }
+                // Shadowing kills the old guard
+                if let Some(pattern) = stmt.child_by_field_name("pattern") {
+                    let name = node_text(pattern, source);
+                    guards.retain(|g| g.name != name);
+                }
+            }
+            "expression_statement" | "expression" => {
+                // Check for drop() calls that kill guard liveness
+                if let Some(dropped) = extract_drop_call(stmt, source) {
+                    guards.retain(|g| g.name != dropped);
+                }
+                // Check for awaits against remaining live guards
+                visit_awaits(stmt, source, &guards, diagnostics);
+            }
+            _ => {
+                visit_awaits(stmt, source, &guards, diagnostics);
+            }
+        }
     }
 }
 
@@ -321,12 +372,10 @@ fn node_to_range(node: Node) -> Range {
 /// Get the first expression child of a statement node.
 fn first_expr_in_stmt(stmt: Node) -> Option<Node> {
     let mut cursor = stmt.walk();
-    for child in stmt.children(&mut cursor) {
-        if child.is_named() && child.kind() != ";" {
-            return Some(child);
-        }
-    }
-    None
+    let result = stmt
+        .children(&mut cursor)
+        .find(|child| child.is_named() && child.kind() != ";");
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +408,12 @@ async fn bad() {
     some_future().await;
 }
 "#;
-        assert_eq!(diag_count(src), 1, "expected 1 diagnostic, got: {:?}", diag_messages(src));
+        assert_eq!(
+            diag_count(src),
+            1,
+            "expected 1 diagnostic, got: {:?}",
+            diag_messages(src)
+        );
     }
 
     #[test]
@@ -371,7 +425,12 @@ async fn bad() {
     some_future().await;
 }
 "#;
-        assert_eq!(diag_count(src), 1, "expected 1 diagnostic, got: {:?}", diag_messages(src));
+        assert_eq!(
+            diag_count(src),
+            1,
+            "expected 1 diagnostic, got: {:?}",
+            diag_messages(src)
+        );
     }
 
     #[test]
@@ -383,7 +442,12 @@ async fn bad() {
     some_future().await;
 }
 "#;
-        assert_eq!(diag_count(src), 1, "expected 1 diagnostic, got: {:?}", diag_messages(src));
+        assert_eq!(
+            diag_count(src),
+            1,
+            "expected 1 diagnostic, got: {:?}",
+            diag_messages(src)
+        );
     }
 
     #[test]
@@ -407,7 +471,11 @@ async fn bad() {
 "#;
         let msgs = diag_messages(src);
         assert_eq!(msgs.len(), 1);
-        assert!(msgs[0].contains("my_guard"), "message should name the guard: {}", msgs[0]);
+        assert!(
+            msgs[0].contains("my_guard"),
+            "message should name the guard: {}",
+            msgs[0]
+        );
     }
 
     #[test]
@@ -422,7 +490,9 @@ async fn bad() {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("async-rust/mutex-across-await".to_string()))
+            Some(NumberOrString::String(
+                "async-rust/mutex-across-await".to_string()
+            ))
         );
     }
 
@@ -454,7 +524,12 @@ async fn bad() {
     }
 }
 "#;
-        assert_eq!(diag_count(src), 1, "expected 1 diagnostic for .await in if body, got: {:?}", diag_messages(src));
+        assert_eq!(
+            diag_count(src),
+            1,
+            "expected 1 diagnostic for .await in if body, got: {:?}",
+            diag_messages(src)
+        );
     }
 
     #[test]
@@ -468,7 +543,12 @@ async fn bad() {
     }
 }
 "#;
-        assert_eq!(diag_count(src), 1, "expected 1 diagnostic for .await in loop body, got: {:?}", diag_messages(src));
+        assert_eq!(
+            diag_count(src),
+            1,
+            "expected 1 diagnostic for .await in loop body, got: {:?}",
+            diag_messages(src)
+        );
     }
 
     // --- GOOD patterns (should produce NO diagnostics) ---
@@ -484,7 +564,11 @@ async fn good() {
     some_future().await;
 }
 "#;
-        assert_eq!(diag_count(src), 0, "should not flag guard dropped before await");
+        assert_eq!(
+            diag_count(src),
+            0,
+            "should not flag guard dropped before await"
+        );
     }
 
     #[test]
@@ -497,7 +581,11 @@ async fn good() {
     some_future().await;
 }
 "#;
-        assert_eq!(diag_count(src), 0, "should not flag after guard name is shadowed");
+        assert_eq!(
+            diag_count(src),
+            0,
+            "should not flag after guard name is shadowed"
+        );
     }
 
     #[test]
@@ -553,7 +641,76 @@ async fn good() {
     }
 }
 "#;
-        assert_eq!(diag_count(src), 0, "should not flag await in if body after guard is dropped");
+        assert_eq!(
+            diag_count(src),
+            0,
+            "should not flag await in if body after guard is dropped"
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_when_drop_in_same_branch_before_await() {
+        let src = r#"
+async fn good() {
+    let guard = mutex.lock().await;
+    let data = guard.clone();
+    if condition {
+        drop(guard);
+        do_async_work(&data).await;
+    }
+}
+"#;
+        assert_eq!(
+            diag_count(src),
+            0,
+            "should not flag await after drop() in same branch"
+        );
+    }
+
+    #[test]
+    fn diagnostic_in_else_branch_without_drop() {
+        let src = r#"
+async fn mixed() {
+    let guard = mutex.lock().await;
+    if condition {
+        drop(guard);
+        do_async_work().await;
+    } else {
+        do_other_work().await;
+    }
+}
+"#;
+        let diags = check_mutex_across_await(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "should flag only the else branch: {:?}",
+            diag_messages(src)
+        );
+        // The flagged await should be do_other_work().await in the else branch
+        assert!(
+            diags[0].message.contains("guard"),
+            "diagnostic should name the guard"
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_when_shadowed_in_nested_block() {
+        let src = r#"
+async fn good() {
+    let guard = mutex.lock().await;
+    let data = guard.clone();
+    if condition {
+        let guard = 42;
+        do_async_work(&data).await;
+    }
+}
+"#;
+        assert_eq!(
+            diag_count(src),
+            0,
+            "should not flag after shadowing in same branch"
+        );
     }
 
     #[test]

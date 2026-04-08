@@ -68,6 +68,18 @@ async fn await_in_nested_if_block() {
     }
 }
 
+/// Guard dropped in one branch but still live in the other — else branch should be flagged.
+async fn drop_in_one_branch_only() {
+    let mutex = Mutex::new(0u32);
+    let guard = mutex.lock().await;
+    if *guard > 0 {
+        drop(guard);
+        some_async_op().await; // fine — guard dropped
+    } else {
+        some_async_op().await; // ← DEADLOCK RISK — guard still held in else branch
+    }
+}
+
 // Stub types/functions for the fixture to parse cleanly
 struct AppState {
     counter: Mutex<u32>,
