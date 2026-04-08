@@ -163,10 +163,14 @@ The rule walks every `block` node in the tree-sitter AST:
    `.read()` creates a live guard entry.
 2. **Drop detection** — an `expression_statement` of the form `drop(<ident>)` removes
    the named guard from the live set.
-3. **Await detection** — any subsequent `await_expression` in the same block, after a
-   live guard's byte offset, triggers a `WARNING` diagnostic at that `.await` site.
-4. **Scope isolation** — nested `block` nodes are handled recursively with their own
-   guard list; guards in inner blocks don't leak to outer blocks.
+3. **Await detection** — any `await_expression` after a live guard's byte offset
+   triggers a `WARNING` diagnostic at that `.await` site. This includes awaits in
+   the RHS of `let_declaration` nodes (e.g. a second lock acquisition) and awaits
+   inside nested blocks (e.g. `if`/`match`/`loop` bodies).
+4. **Scope propagation** — outer-scope guards propagate into nested `block` nodes
+   (if/match/loop bodies) for await checking. Each nested block is also analyzed
+   independently with its own guard list; guards defined in inner blocks don't
+   leak to outer blocks.
 
 The rule intentionally does **not** flag `std::sync::Mutex` (sync, no `.await` in
 acquisition) — that case is already handled by `clippy::await_holding_lock`.
