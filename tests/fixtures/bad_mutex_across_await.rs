@@ -46,6 +46,28 @@ async fn multiple_guards_across_await() {
     flush().await; // ← DEADLOCK RISK — both guards live here
 }
 
+/// Second lock acquisition while first guard is still live.
+/// The `.await` in the let RHS should be flagged.
+async fn let_rhs_await_with_live_guard() {
+    let m1 = Mutex::new(1u32);
+    let m2 = RwLock::new(2u32);
+    let mut guard = m1.lock().await;
+    *guard = 10;
+    let mut id = m2.write().await; // ← DEADLOCK RISK — guard still held across this await
+    *id = 20;
+}
+
+/// Guard from outer scope held across `.await` inside an if body.
+async fn await_in_nested_if_block() {
+    let lock = RwLock::new(vec![1u8, 2, 3]);
+    let presence = lock.read().await;
+    let peers: Vec<u8> = presence.clone();
+    if !peers.is_empty() {
+        let bytes = peers;
+        send_bytes(&bytes).await; // ← DEADLOCK RISK — presence guard still live
+    }
+}
+
 // Stub types/functions for the fixture to parse cleanly
 struct AppState {
     counter: Mutex<u32>,
@@ -56,3 +78,4 @@ fn process(_: &u32) {}
 async fn some_async_op() {}
 async fn notify_clients() {}
 async fn flush() {}
+async fn send_bytes(_: &[u8]) {}

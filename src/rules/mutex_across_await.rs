@@ -90,11 +90,19 @@ fn analyze_block(block: Node, source: &[u8], diagnostics: &mut Vec<Diagnostic>) 
         match stmt.kind() {
             // `let <pat> = <expr>;`
             "let_declaration" => {
+                // Check the RHS for awaits against already-live guards.
+                // This catches e.g. `let id = other.write().await` while a
+                // prior guard is still live.
+                if let Some(value) = stmt.child_by_field_name("value") {
+                    check_await_in_expr(value, source, &guards, diagnostics);
+                }
+
+                // Then register this binding as a new guard if applicable.
+                // Order matters: scan first so the new binding doesn't flag
+                // against its own `.await`.
                 if let Some(binding) = extract_guard_binding(stmt, source) {
                     guards.push(binding);
                 }
-                // Also check if this let drops a guard via pattern shadowing — not needed for
-                // the conservative approach.
             }
 
             // `<expr>;` or bare `<expr>` (last expr in block)
@@ -268,10 +276,11 @@ fn visit_awaits(node: Node, source: &[u8], guards: &[GuardBinding], diagnostics:
         return;
     }
 
-    // Skip nested blocks — they have their own guard scope analysis
-    if node.kind() == "block" {
-        return;
-    }
+    // Recurse into nested blocks so that outer-scope guards are checked
+    // against `.await` expressions inside if/match/loop/bare-block bodies.
+    // Each nested block is also analyzed independently by walk_blocks() with
+    // its own guard list, but that won't duplicate diagnostics since inner
+    // analyze_block() starts with an empty guard set.
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -410,6 +419,51 @@ async fn bad() {
         );
     }
 
+    #[test]
+    fn detects_await_in_let_rhs_with_live_guard() {
+        let src = r#"
+async fn bad() {
+    let guard = m1.lock().await;
+    *guard = 1;
+    let id = m2.write().await;
+    *id = 2;
+}
+"#;
+        assert!(
+            diag_count(src) >= 1,
+            "expected diagnostic for .await in let RHS while guard is live, got: {:?}",
+            diag_messages(src)
+        );
+    }
+
+    #[test]
+    fn detects_await_in_nested_if_block() {
+        let src = r#"
+async fn bad() {
+    let guard = mutex.read().await;
+    let snapshot = guard.clone();
+    if !snapshot.is_empty() {
+        send_frame().await;
+    }
+}
+"#;
+        assert_eq!(diag_count(src), 1, "expected 1 diagnostic for .await in if body, got: {:?}", diag_messages(src));
+    }
+
+    #[test]
+    fn detects_await_in_nested_loop_block() {
+        let src = r#"
+async fn bad() {
+    let guard = mutex.lock().await;
+    loop {
+        do_work().await;
+        break;
+    }
+}
+"#;
+        assert_eq!(diag_count(src), 1, "expected 1 diagnostic for .await in loop body, got: {:?}", diag_messages(src));
+    }
+
     // --- GOOD patterns (should produce NO diagnostics) ---
 
     #[test]
@@ -465,6 +519,21 @@ async fn fine() {
 }
 "#;
         assert_eq!(diag_count(src), 0);
+    }
+
+    #[test]
+    fn no_diagnostic_for_await_in_if_after_drop() {
+        let src = r#"
+async fn good() {
+    let guard = mutex.lock().await;
+    let value = *guard;
+    drop(guard);
+    if condition {
+        some_future().await;
+    }
+}
+"#;
+        assert_eq!(diag_count(src), 0, "should not flag await in if body after guard is dropped");
     }
 
     #[test]
