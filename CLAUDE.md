@@ -168,9 +168,12 @@ The rule walks every `block` node in the tree-sitter AST:
    the RHS of `let_declaration` nodes (e.g. a second lock acquisition) and awaits
    inside nested blocks (e.g. `if`/`match`/`loop` bodies).
 4. **Scope propagation** — outer-scope guards propagate into nested `block` nodes
-   (if/match/loop bodies) for await checking. Each nested block is also analyzed
-   independently with its own guard list; guards defined in inner blocks don't
-   leak to outer blocks.
+   (if/match/loop bodies) for await checking. When entering a nested block,
+   `drop()` calls and `let` shadowing within that block update a branch-local
+   copy of the guard set, so `drop(guard)` in one `if` branch kills liveness
+   for subsequent awaits in that branch without affecting the `else` branch.
+   Each nested block is also analyzed independently with its own guard list;
+   guards defined in inner blocks don't leak to outer blocks.
 
 The rule intentionally does **not** flag `std::sync::Mutex` (sync, no `.await` in
 acquisition) — that case is already handled by `clippy::await_holding_lock`.

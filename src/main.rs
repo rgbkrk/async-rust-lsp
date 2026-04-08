@@ -26,11 +26,7 @@ impl Backend {
     async fn analyze_document(&self, uri: Url, text: &str) {
         let diagnostics = check_mutex_across_await(text);
 
-        debug!(
-            "Publishing {} diagnostic(s) for {}",
-            diagnostics.len(),
-            uri
-        );
+        debug!("Publishing {} diagnostic(s) for {}", diagnostics.len(), uri);
 
         self.client
             .publish_diagnostics(uri, diagnostics, None)
@@ -141,10 +137,7 @@ impl LanguageServer for Backend {
 #[tokio::main]
 async fn main() {
     // Log to a file so we don't pollute stdio (LSP uses stdio for protocol messages)
-    let log_file = tracing_appender::rolling::never(
-        std::env::temp_dir(),
-        "async-rust-lsp.log",
-    );
+    let log_file = tracing_appender::rolling::never(std::env::temp_dir(), "async-rust-lsp.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(log_file);
     tracing_subscriber::fmt()
         .with_writer(non_blocking)

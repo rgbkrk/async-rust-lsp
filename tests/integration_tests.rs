@@ -53,7 +53,9 @@ fn fixture_bad_diagnostic_code_is_mutex_across_await() {
     for diag in &diags {
         assert_eq!(
             diag.code,
-            Some(NumberOrString::String("async-rust/mutex-across-await".to_string())),
+            Some(NumberOrString::String(
+                "async-rust/mutex-across-await".to_string()
+            )),
         );
     }
 }
@@ -82,7 +84,10 @@ fn fixture_good_produces_no_diagnostics() {
     assert!(
         diags.is_empty(),
         "Expected no diagnostics for good_no_mutex_across_await.rs, got: {:#?}",
-        diags.iter().map(|d| (&d.range, &d.message)).collect::<Vec<_>>()
+        diags
+            .iter()
+            .map(|d| (&d.range, &d.message))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -149,5 +154,8 @@ async fn bad() {
     let diags = check_mutex_across_await(src);
     assert_eq!(diags.len(), 1);
     // The diagnostic should be on line 3 (0-indexed), at "something().await"
-    assert_eq!(diags[0].range.start.line, 3, "diagnostic should be on line 3");
+    assert_eq!(
+        diags[0].range.start.line, 3,
+        "diagnostic should be on line 3"
+    );
 }

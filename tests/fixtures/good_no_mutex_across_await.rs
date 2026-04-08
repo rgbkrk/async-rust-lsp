@@ -62,6 +62,28 @@ async fn rwlock_write_explicit_drop() {
     some_async_op().await; // fine
 }
 
+/// Guard dropped inside a conditional branch before the await in that branch.
+async fn drop_in_conditional_branch() {
+    let mutex = Mutex::new(0u32);
+    let guard = mutex.lock().await;
+    let data = *guard;
+    if data > 0 {
+        drop(guard);
+        some_async_op().await; // fine — guard dropped in this branch
+    }
+}
+
+/// Guard shadowed inside a conditional branch before the await in that branch.
+async fn shadowed_in_conditional_branch() {
+    let mutex = Mutex::new(0u32);
+    let guard = mutex.lock().await;
+    let data = *guard;
+    if data > 0 {
+        let guard = 42;
+        some_async_op().await; // fine — guard shadowed in this branch
+    }
+}
+
 /// No async at all — should not produce diagnostics.
 fn sync_function() {
     let x = 42u32;
