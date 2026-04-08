@@ -1,0 +1,14 @@
+/Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/deps/serde-d467e6c62b559fca.d: /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/build/serde-2d91f1bc73869294/out/private.rs
+
+/Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/deps/libserde-d467e6c62b559fca.rlib: /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/build/serde-2d91f1bc73869294/out/private.rs
+
+/Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/deps/libserde-d467e6c62b559fca.rmeta: /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/build/serde-2d91f1bc73869294/out/private.rs
+
+/Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/kylekelley/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/build/serde-2d91f1bc73869294/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/kylekelley/code/src/github.com/rgbkrk/async-rust-lsp/target/debug/build/serde-2d91f1bc73869294/out

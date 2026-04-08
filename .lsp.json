@@ -1,0 +1,8 @@
+{
+  "async-rust-lsp": {
+    "command": "${CLAUDE_PLUGIN_ROOT}/target/release/async-rust-lsp",
+    "extensionToLanguage": {
+      ".rs": "rust"
+    }
+  }
+}

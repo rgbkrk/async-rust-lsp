@@ -1,0 +1,12 @@
+{
+  "name": "async-rust-lsp",
+  "version": "0.1.0",
+  "description": "Detects tokio::sync::Mutex guards held across .await points — a pattern clippy misses",
+  "author": {
+    "name": "Kyle Kelley",
+    "url": "https://github.com/rgbkrk"
+  },
+  "repository": "https://github.com/rgbkrk/async-rust-lsp",
+  "license": "MIT",
+  "keywords": ["rust", "lsp", "tokio", "async", "deadlock", "lint"]
+}

@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f \"${CLAUDE_PLUGIN_ROOT}/target/release/async-rust-lsp\" || (cd \"${CLAUDE_PLUGIN_ROOT}\" && cargo build --release 2>/dev/null)"
+          }
+        ]
+      }
+    ]
+  }
+}
