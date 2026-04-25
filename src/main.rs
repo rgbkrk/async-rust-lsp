@@ -1,5 +1,8 @@
-use async_rust_lsp::rules::cancel_unsafe_in_select::check_cancel_unsafe_in_select;
+use async_rust_lsp::config::Config;
+use async_rust_lsp::rules::cancel_unsafe_in_select::check_cancel_unsafe_in_select_with;
 use async_rust_lsp::rules::mutex_across_await::check_mutex_across_await;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
@@ -8,25 +11,54 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, info};
 
 /// Shared document store: URI -> text content
-type DocumentStore = Arc<RwLock<std::collections::HashMap<String, String>>>;
+type DocumentStore = Arc<RwLock<HashMap<String, String>>>;
+
+/// Cached per-workspace config keyed by the directory the file was
+/// discovered in (or, when no file is found, the leaf directory probed).
+type ConfigCache = Arc<RwLock<HashMap<PathBuf, Arc<Config>>>>;
 
 struct Backend {
     client: Client,
     documents: DocumentStore,
+    configs: ConfigCache,
 }
 
 impl Backend {
     fn new(client: Client) -> Self {
         Self {
             client,
-            documents: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            documents: Arc::new(RwLock::new(HashMap::new())),
+            configs: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Resolve the workspace config for `uri`, caching the result per
+    /// workspace directory so we don't re-stat the filesystem on every
+    /// keystroke.
+    async fn config_for(&self, uri: &Url) -> Arc<Config> {
+        let Some(path) = uri.to_file_path().ok() else {
+            return Arc::new(Config::default());
+        };
+        let start = path.parent().unwrap_or(&path).to_path_buf();
+
+        // Discover synchronously; spawn_blocking would be ideal for
+        // really large workspace trees but `discover_from` only stats
+        // a handful of parents.
+        let (cfg, root) = Config::discover_from(&start);
+        let cfg = Arc::new(cfg);
+
+        let mut cache = self.configs.write().await;
+        cache.entry(root).or_insert_with(|| Arc::clone(&cfg));
+        Arc::clone(&cfg)
     }
 
     /// Parse and publish diagnostics for a document.
     async fn analyze_document(&self, uri: Url, text: &str) {
+        let cfg = self.config_for(&uri).await;
+        let extras = &cfg.rules.cancel_unsafe_in_select.extra;
+
         let mut diagnostics = check_mutex_across_await(text);
-        diagnostics.extend(check_cancel_unsafe_in_select(text));
+        diagnostics.extend(check_cancel_unsafe_in_select_with(text, extras));
 
         debug!("Publishing {} diagnostic(s) for {}", diagnostics.len(), uri);
 

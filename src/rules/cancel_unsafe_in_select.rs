@@ -53,8 +53,25 @@ const CANCEL_UNSAFE: &[&str] = &[
     "write_all_buf",
 ];
 
-/// Entry point: parse `source` and return all diagnostics.
+/// Entry point: parse `source` and return all diagnostics using the
+/// built-in cancel-unsafe list only.
+///
+/// For project-specific wrappers (e.g. a function that delegates to
+/// `read_exact` internally), use `check_cancel_unsafe_in_select_with`
+/// and pass the wrapper names as `extra`.
 pub fn check_cancel_unsafe_in_select(source: &str) -> Vec<Diagnostic> {
+    let empty: &[&str] = &[];
+    check_cancel_unsafe_in_select_with(source, empty)
+}
+
+/// Like `check_cancel_unsafe_in_select`, but also flags calls to any
+/// name in `extra`. Use this to flag project-local wrappers that
+/// transitively call cancel-unsafe primitives — the rule itself can't
+/// follow function bodies across files.
+pub fn check_cancel_unsafe_in_select_with<S: AsRef<str>>(
+    source: &str,
+    extra: &[S],
+) -> Vec<Diagnostic> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_rust::language())
@@ -67,18 +84,24 @@ pub fn check_cancel_unsafe_in_select(source: &str) -> Vec<Diagnostic> {
 
     let source_bytes = source.as_bytes();
     let mut diagnostics = Vec::new();
-    walk(tree.root_node(), source_bytes, &mut diagnostics);
+    let extra_refs: Vec<&str> = extra.iter().map(|s| s.as_ref()).collect();
+    walk(
+        tree.root_node(),
+        source_bytes,
+        &extra_refs,
+        &mut diagnostics,
+    );
     diagnostics
 }
 
 /// Recursively walk the tree, analyzing every `select!` macro invocation.
-fn walk(node: Node, source: &[u8], diagnostics: &mut Vec<Diagnostic>) {
+fn walk(node: Node, source: &[u8], extra: &[&str], diagnostics: &mut Vec<Diagnostic>) {
     if node.kind() == "macro_invocation" && is_select_macro(node, source) {
-        analyze_select(node, source, diagnostics);
+        analyze_select(node, source, extra, diagnostics);
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk(child, source, diagnostics);
+        walk(child, source, extra, diagnostics);
     }
 }
 
@@ -96,7 +119,12 @@ fn is_select_macro(node: Node, source: &[u8]) -> bool {
 
 /// Extract arm-future text ranges from a `select!` body and emit a
 /// diagnostic for each cancel-unsafe call inside one.
-fn analyze_select(macro_node: Node, source: &[u8], diagnostics: &mut Vec<Diagnostic>) {
+fn analyze_select(
+    macro_node: Node,
+    source: &[u8],
+    extra: &[&str],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     // The macro_invocation text includes the path and the body. We slice
     // from the first `{` to the matching `}` so the depth tracker starts
     // inside the body, not outside it.
@@ -117,11 +145,21 @@ fn analyze_select(macro_node: Node, source: &[u8], diagnostics: &mut Vec<Diagnos
 
     for (start, end) in extract_arm_future_ranges(body) {
         let arm = &body[start..end];
-        for &name in CANCEL_UNSAFE {
+        let mut emit = |name: &str| {
             for offset in find_call_positions(arm, name) {
                 let abs_start = body_offset + start + offset;
                 let abs_end = abs_start + name.len();
                 diagnostics.push(make_diagnostic(source, abs_start, abs_end, name));
+            }
+        };
+        for &name in CANCEL_UNSAFE {
+            emit(name);
+        }
+        for &name in extra {
+            // Skip names already in the built-in list to avoid duplicate
+            // diagnostics if a user lists e.g. "read_exact" in their config.
+            if !CANCEL_UNSAFE.contains(&name) {
+                emit(name);
             }
         }
     }
@@ -682,5 +720,70 @@ async fn bad(reader: &mut R) {
     fn find_call_positions_must_be_followed_by_paren() {
         let p = find_call_positions("foo.read_exact = 5", "read_exact");
         assert!(p.is_empty(), "got {:?}", p);
+    }
+
+    // --- Project-level extras ---
+
+    #[test]
+    fn extras_flag_project_wrappers() {
+        // The exact pre-fix nteract pattern: `recv_typed_frame` is a
+        // wrapper around `read_exact`. The default rule misses it; the
+        // extras list catches it.
+        let src = r#"
+async fn the_bug_we_fixed<R>(reader: &mut R, rx: &mut Receiver<u8>) {
+    tokio::select! {
+        biased;
+        frame = connection::recv_typed_frame(&mut reader) => println!("{:?}", frame),
+        cmd = rx.recv() => println!("{:?}", cmd),
+    };
+}
+"#;
+        // Default list misses the wrapper.
+        assert_eq!(check_cancel_unsafe_in_select(src).len(), 0);
+
+        // With the wrapper in extras, we catch it.
+        let extras = ["recv_typed_frame", "send_typed_frame"];
+        let diags = check_cancel_unsafe_in_select_with(src, &extras);
+        assert_eq!(diags.len(), 1, "got: {:?}", diags);
+        assert!(
+            diags[0].message.contains("recv_typed_frame"),
+            "diagnostic should name the wrapper, got: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn extras_does_not_double_flag_built_in_names() {
+        // Listing `read_exact` (already built-in) in extras must not
+        // produce two diagnostics.
+        let src = r#"
+async fn bad(reader: &mut R) {
+    let mut buf = [0u8; 4];
+    tokio::select! {
+        _ = reader.read_exact(&mut buf) => (),
+        _ = sleep_for_a_bit() => (),
+    }
+}
+"#;
+        let extras = ["read_exact"];
+        let diags = check_cancel_unsafe_in_select_with(src, &extras);
+        assert_eq!(diags.len(), 1, "got: {:?}", diags);
+    }
+
+    #[test]
+    fn extras_accepts_string_slice() {
+        // The `_with` variant should accept owned Strings too, not just
+        // &str literals — this is the LSP-config plumbing path.
+        let src = r#"
+async fn bad(reader: &mut R) {
+    tokio::select! {
+        _ = my_wrapper(reader) => (),
+        _ = sleep_for_a_bit() => (),
+    }
+}
+"#;
+        let extras: Vec<String> = vec!["my_wrapper".to_string()];
+        let diags = check_cancel_unsafe_in_select_with(src, &extras);
+        assert_eq!(diags.len(), 1, "got: {:?}", diags);
     }
 }
