@@ -37,6 +37,42 @@ The rule tracks guard liveness through:
 - `let` shadowing that kills the guard binding
 - Block scoping (guard dropped at end of block)
 
+### `async-rust/cancel-unsafe-in-select`
+
+Warns when a non-cancel-safe future is used in the future-expression position of a `tokio::select!` arm. When a sibling arm wins the race, losing futures are dropped mid-poll — futures built on `read_exact`, `write_all`, and friends discard their buffered bytes when dropped, silently desynchronizing length-prefixed wire protocols.
+
+```rust
+// BAD — read_exact loses bytes when the other arm wins
+tokio::select! {
+    _ = reader.read_exact(&mut buf) => (), // WARNING: not cancel-safe
+    _ = sleep_for_a_bit() => (),
+}
+
+// OK — mpsc::Receiver::recv is cancel-safe; move the read into an actor
+tokio::select! {
+    msg = framed_reader.recv() => (), // recv() over mpsc — fine to drop
+    _ = sleep_for_a_bit() => (),
+}
+```
+
+Flagged tokio primitives:
+- `read_exact`, `read_to_end`, `read_to_string`, `read_buf`
+- `read_line`, `read_until`
+- `write_all`, `write_buf`, `write_all_buf`
+
+The rule only flags calls in the *future-expression* position (LHS of `=>`). Calls inside an arm's handler block are fine — by the time the block runs, the arm has already won and won't be cancelled.
+
+**Project-local wrappers** — drop a `.async-rust-lsp.toml` next to your `Cargo.toml`:
+
+```toml
+[rules.cancel-unsafe-in-select]
+extra = ["recv_typed_frame", "send_typed_frame"]
+```
+
+The rule can't follow function bodies across files, so a wrapper that internally calls `read_exact` won't be flagged by default. List the wrapper names in `extra` and the rule will treat them like the built-in primitives. Built-in names listed in `extra` are deduplicated.
+
+Origin: nteract relay desync that surfaced as `frame too large: 1818192238 bytes` — four bytes of streaming kernel stdout reinterpreted as a length prefix. See [nteract/desktop#2182](https://github.com/nteract/desktop/pull/2182).
+
 ## Installation
 
 ```bash

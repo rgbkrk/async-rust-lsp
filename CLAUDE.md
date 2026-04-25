@@ -11,18 +11,21 @@ cargo run            # start the LSP server (reads/writes stdio)
 ## Project layout
 
 ```
-Cargo.toml                        — workspace manifest
+Cargo.toml                            — workspace manifest
 src/
-  lib.rs                          — public crate root (re-exports rules)
-  main.rs                         — LSP binary (tower-lsp lifecycle)
+  lib.rs                              — public crate root (re-exports rules)
+  main.rs                             — LSP binary (tower-lsp lifecycle)
   rules/
-    mod.rs                        — rule registry
-    mutex_across_await.rs         — rule + unit tests
+    mod.rs                            — rule registry
+    mutex_across_await.rs             — rule + unit tests
+    cancel_unsafe_in_select.rs        — rule + unit tests
 tests/
-  integration_tests.rs            — fixture-based integration tests
+  integration_tests.rs                — fixture-based integration tests
   fixtures/
-    bad_mutex_across_await.rs     — patterns that MUST produce diagnostics
-    good_no_mutex_across_await.rs — patterns that MUST produce zero diagnostics
+    bad_mutex_across_await.rs         — patterns that MUST produce diagnostics
+    good_no_mutex_across_await.rs     — patterns that MUST produce zero diagnostics
+    bad_cancel_unsafe_in_select.rs    — patterns that MUST produce diagnostics
+    good_cancel_safe_in_select.rs     — patterns that MUST produce zero diagnostics
 ```
 
 ## Crate structure: lib + bin
@@ -177,3 +180,43 @@ The rule walks every `block` node in the tree-sitter AST:
 
 The rule intentionally does **not** flag `std::sync::Mutex` (sync, no `.await` in
 acquisition) — that case is already handled by `clippy::await_holding_lock`.
+
+## Detection algorithm (cancel-unsafe-in-select)
+
+The rule walks every `macro_invocation` whose macro path's last segment is
+`select` (matches `select!`, `tokio::select!`, etc.). For each such macro:
+
+1. **Body slice** — take the substring between the first `{` and last `}` of the
+   macro_invocation's text. tree-sitter-rust parses macro bodies as opaque
+   `token_tree`, so the rule does its own light scan over the body bytes.
+2. **Arm-future extraction** — a depth-tracking scanner walks the body
+   (skipping string literals, char literals, line comments, and block comments)
+   and emits `(start, end)` byte offsets for each region between a `<pat> =`
+   and its matching `=>` at brace/paren/bracket depth 0. `==`, `!=`, `>=`,
+   `<=`, and the `=>` arrow itself are not treated as arm starts.
+3. **Call-site search** — within each arm-future region, the rule looks for
+   `<unsafe_name>(` patterns where `<unsafe_name>` is a known cancel-unsafe
+   tokio primitive. Word-boundary checks prevent false matches on names like
+   `read_exact_extra`.
+4. **Diagnostic** — emitted at the byte range of the method/function name,
+   with code `async-rust/cancel-unsafe-in-select`.
+
+The arm-handler block (RHS of `=>`) is intentionally excluded — once an arm
+wins, its handler runs to completion without being cancelled.
+
+The default cancel-unsafe list covers tokio's `AsyncReadExt`, `AsyncBufReadExt`,
+and `AsyncWriteExt` primitives. User wrappers (e.g. `recv_typed_frame` that
+delegates to `read_exact`) aren't followed — the rule flags only direct uses
+of the primitives. To catch a wrapper either (a) refactor it to be cancel-safe
+at the caller boundary (e.g. with an actor + mpsc channel), or (b) add the
+wrapper to a project-local `.async-rust-lsp.toml`:
+
+```toml
+[rules.cancel-unsafe-in-select]
+extra = ["recv_typed_frame", "send_typed_frame"]
+```
+
+The LSP backend walks up from each opened file looking for the config and
+caches the parsed `Config` per workspace directory. `Config::discover_from`
+in `src/config.rs` is the entry point; it never panics on malformed user
+config — bad files log a warning via `tracing` and fall back to defaults.

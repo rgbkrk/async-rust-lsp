@@ -2,6 +2,7 @@
 ///
 /// These tests load fixture files from `tests/fixtures/` and verify that the
 /// rule engine produces the expected diagnostics.
+use async_rust_lsp::rules::cancel_unsafe_in_select::check_cancel_unsafe_in_select;
 use async_rust_lsp::rules::mutex_across_await::check_mutex_across_await;
 
 // ---------------------------------------------------------------------------
@@ -157,5 +158,109 @@ async fn bad() {
     assert_eq!(
         diags[0].range.start.line, 3,
         "diagnostic should be on line 3"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// cancel-unsafe-in-select fixtures
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fixture_bad_cancel_unsafe_produces_diagnostics() {
+    let source = include_str!("fixtures/bad_cancel_unsafe_in_select.rs");
+    let diags = check_cancel_unsafe_in_select(source);
+    assert!(
+        !diags.is_empty(),
+        "Expected diagnostics for bad_cancel_unsafe_in_select.rs, got none"
+    );
+}
+
+#[test]
+fn fixture_bad_cancel_unsafe_flags_every_arm() {
+    let source = include_str!("fixtures/bad_cancel_unsafe_in_select.rs");
+    let diags = check_cancel_unsafe_in_select(source);
+    // The fixture has 10 cancel-unsafe call sites across 9 functions
+    // (one fn has two unsafe arms in the same select!). Verify we catch
+    // all of them.
+    assert_eq!(
+        diags.len(),
+        10,
+        "expected 10 diagnostics, got {}: {:?}",
+        diags.len(),
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fixture_bad_cancel_unsafe_diagnostic_code() {
+    use tower_lsp::lsp_types::NumberOrString;
+    let source = include_str!("fixtures/bad_cancel_unsafe_in_select.rs");
+    let diags = check_cancel_unsafe_in_select(source);
+    for diag in &diags {
+        assert_eq!(
+            diag.code,
+            Some(NumberOrString::String(
+                "async-rust/cancel-unsafe-in-select".to_string()
+            )),
+        );
+    }
+}
+
+#[test]
+fn fixture_bad_cancel_unsafe_all_warnings() {
+    use tower_lsp::lsp_types::DiagnosticSeverity;
+    let source = include_str!("fixtures/bad_cancel_unsafe_in_select.rs");
+    let diags = check_cancel_unsafe_in_select(source);
+    for diag in &diags {
+        assert_eq!(
+            diag.severity,
+            Some(DiagnosticSeverity::WARNING),
+            "all diagnostics should be WARNING severity"
+        );
+    }
+}
+
+#[test]
+fn fixture_good_cancel_safe_produces_no_diagnostics() {
+    let source = include_str!("fixtures/good_cancel_safe_in_select.rs");
+    let diags = check_cancel_unsafe_in_select(source);
+    assert!(
+        diags.is_empty(),
+        "Expected no diagnostics for good_cancel_safe_in_select.rs, got: {:#?}",
+        diags
+            .iter()
+            .map(|d| (&d.range, &d.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn cancel_unsafe_does_not_flag_mutex_fixtures() {
+    // Sanity check: the mutex-rule fixtures must not trigger the
+    // cancel-unsafe rule (and vice versa, covered by the existing
+    // mutex tests above).
+    let bad_mutex = include_str!("fixtures/bad_mutex_across_await.rs");
+    let good_mutex = include_str!("fixtures/good_no_mutex_across_await.rs");
+    assert!(
+        check_cancel_unsafe_in_select(bad_mutex).is_empty(),
+        "cancel-unsafe rule should not fire on the mutex bad fixture"
+    );
+    assert!(
+        check_cancel_unsafe_in_select(good_mutex).is_empty(),
+        "cancel-unsafe rule should not fire on the mutex good fixture"
+    );
+}
+
+#[test]
+fn mutex_rule_does_not_flag_cancel_unsafe_fixtures() {
+    let bad = include_str!("fixtures/bad_cancel_unsafe_in_select.rs");
+    let good = include_str!("fixtures/good_cancel_safe_in_select.rs");
+    assert!(
+        check_mutex_across_await(bad).is_empty(),
+        "mutex rule should not fire on the cancel-unsafe bad fixture"
+    );
+    assert!(
+        check_mutex_across_await(good).is_empty(),
+        "mutex rule should not fire on the cancel-unsafe good fixture"
     );
 }
