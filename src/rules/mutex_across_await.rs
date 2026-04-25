@@ -11,7 +11,7 @@
 //!
 //! ## Detection strategy
 //!
-//! Pattern (conservative, catches the nteract-style deadlock):
+//! Pattern (conservative, catches the classic tokio-mutex deadlock):
 //!
 //! ```text
 //! // BAD — guard lives across the await

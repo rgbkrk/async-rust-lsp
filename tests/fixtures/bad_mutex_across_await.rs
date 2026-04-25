@@ -1,16 +1,17 @@
 // FIXTURE: bad patterns — each async fn below should produce at least one diagnostic.
 
-use tokio::sync::{Mutex, RwLock};
 use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 
-/// Classic case: tokio Mutex guard held across a plain `.await`.
-/// This is exactly the nteract desktop deadlock pattern.
+/// Classic case: tokio Mutex guard held across a plain `.await`. This is
+/// the textbook async-daemon deadlock — works in unit tests, locks up
+/// the runtime in production.
 async fn basic_mutex_across_await() {
     let mutex = Mutex::new(0u32);
-    let guard = mutex.lock().await;   // acquires guard
+    let guard = mutex.lock().await; // acquires guard
     do_work(*guard);
     tokio::time::sleep(std::time::Duration::from_millis(1)).await; // ← DEADLOCK RISK
-    // guard drops here (end of fn) but it was held across the await above
+                                                                   // guard drops here (end of fn) but it was held across the await above
 }
 
 /// RwLock write guard held across an await.

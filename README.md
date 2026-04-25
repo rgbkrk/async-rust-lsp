@@ -71,7 +71,7 @@ extra = ["recv_typed_frame", "send_typed_frame"]
 
 The rule can't follow function bodies across files, so a wrapper that internally calls `read_exact` won't be flagged by default. List the wrapper names in `extra` and the rule will treat them like the built-in primitives. Built-in names listed in `extra` are deduplicated.
 
-Origin: nteract relay desync that surfaced as `frame too large: 1818192238 bytes` — four bytes of streaming kernel stdout reinterpreted as a length prefix. See [nteract/desktop#2182](https://github.com/nteract/desktop/pull/2182).
+Classic failure mode: a framed-protocol relay starts logging `frame too large: 1818192238 bytes` out of nowhere. Four bytes of streaming payload got reinterpreted as a length prefix after a losing `read_exact` dropped its partial read.
 
 ## Installation
 
@@ -175,7 +175,7 @@ Built with:
 
 ## Origin
 
-Born from a real deadlock in the [nteract desktop](https://github.com/nteract/desktop) daemon. See [nteract/desktop#1614](https://github.com/nteract/desktop/pull/1614). The gap in static analysis for tokio async patterns is well-known but no one has filled it with an LSP yet.
+Born from a real deadlock in a tokio-based daemon — a `tokio::sync::Mutex` guard held across an `.await`, the kind of bug that works in testing and locks up in production. The gap in static analysis for tokio async patterns is well-known but no one has filled it with an LSP yet.
 
 ## License
 

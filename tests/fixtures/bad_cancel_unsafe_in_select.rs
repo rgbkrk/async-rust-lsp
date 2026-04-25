@@ -6,9 +6,9 @@ use tokio::sync::mpsc;
 
 /// Classic framed-protocol failure mode. `read_exact` partial reads are
 /// dropped when the other arm wins; the next read interprets payload
-/// bytes as a fresh length prefix. This is exactly the nteract relay
-/// desync that produced `frame too large: 1818192238 bytes` in
-/// production logs.
+/// bytes as a fresh length prefix. The symptom in production logs is a
+/// nonsense length like `frame too large: 1818192238 bytes` — four
+/// bytes of streaming payload reinterpreted as a header.
 async fn read_exact_in_select<R: AsyncReadExt + Unpin>(
     reader: &mut R,
     rx: &mut mpsc::Receiver<u8>,

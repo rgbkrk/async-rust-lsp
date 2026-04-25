@@ -32,8 +32,8 @@ async fn unsafe_call_in_handler_block_is_ok<R: AsyncReadExt + Unpin>(reader: &mu
 
 /// `framed_reader.recv()` is cancel-safe because `FramedReader` is an
 /// actor: the `read_exact` call lives inside a dedicated task, and the
-/// `select!` arm only awaits an `mpsc::Receiver`. This is exactly the
-/// fix shipped in nteract PR #2182.
+/// `select!` arm only awaits an `mpsc::Receiver`. The canonical fix for
+/// a cancel-unsafe framed reader is this actor boundary.
 async fn actor_pattern_is_safe(framed: &mut FramedReader) {
     tokio::select! {
         frame = framed.recv() => println!("{:?}", frame),

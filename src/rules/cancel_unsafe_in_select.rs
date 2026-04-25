@@ -407,10 +407,11 @@ async fn bad(reader: &mut R) {
 
     #[test]
     fn detects_qualified_path_call_in_select_arm() {
-        // The classic nteract failure mode: `connection::recv_typed_frame`.
-        // The function name `recv_typed_frame` isn't in our default list,
-        // but its body calls `read_exact`. We detect at the leaf: anyone
-        // who writes `read_exact` directly in a select arm is flagged.
+        // The classic wrapper-hides-the-primitive failure mode:
+        // `connection::recv_typed_frame`. The function name isn't in our
+        // default list, but its body calls `read_exact`. We detect at the
+        // leaf: anyone who writes `read_exact` directly in a select arm is
+        // flagged.
         let src = r#"
 async fn bad(reader: &mut R) {
     tokio::select! {
@@ -726,9 +727,8 @@ async fn bad(reader: &mut R) {
 
     #[test]
     fn extras_flag_project_wrappers() {
-        // The exact pre-fix nteract pattern: `recv_typed_frame` is a
-        // wrapper around `read_exact`. The default rule misses it; the
-        // extras list catches it.
+        // The classic wrapper case: `recv_typed_frame` wraps `read_exact`.
+        // The default rule misses the wrapper; the extras list catches it.
         let src = r#"
 async fn the_bug_we_fixed<R>(reader: &mut R, rx: &mut Receiver<u8>) {
     tokio::select! {
