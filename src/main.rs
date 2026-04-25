@@ -1,3 +1,4 @@
+use async_rust_lsp::rules::cancel_unsafe_in_select::check_cancel_unsafe_in_select;
 use async_rust_lsp::rules::mutex_across_await::check_mutex_across_await;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -24,7 +25,8 @@ impl Backend {
 
     /// Parse and publish diagnostics for a document.
     async fn analyze_document(&self, uri: Url, text: &str) {
-        let diagnostics = check_mutex_across_await(text);
+        let mut diagnostics = check_mutex_across_await(text);
+        diagnostics.extend(check_cancel_unsafe_in_select(text));
 
         debug!("Publishing {} diagnostic(s) for {}", diagnostics.len(), uri);
 
