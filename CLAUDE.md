@@ -207,5 +207,16 @@ wins, its handler runs to completion without being cancelled.
 The default cancel-unsafe list covers tokio's `AsyncReadExt`, `AsyncBufReadExt`,
 and `AsyncWriteExt` primitives. User wrappers (e.g. `recv_typed_frame` that
 delegates to `read_exact`) aren't followed — the rule flags only direct uses
-of the primitives. To catch a wrapper, refactor it to be cancel-safe at the
-caller boundary (e.g. with an actor + mpsc channel).
+of the primitives. To catch a wrapper either (a) refactor it to be cancel-safe
+at the caller boundary (e.g. with an actor + mpsc channel), or (b) add the
+wrapper to a project-local `.async-rust-lsp.toml`:
+
+```toml
+[rules.cancel-unsafe-in-select]
+extra = ["recv_typed_frame", "send_typed_frame"]
+```
+
+The LSP backend walks up from each opened file looking for the config and
+caches the parsed `Config` per workspace directory. `Config::discover_from`
+in `src/config.rs` is the entry point; it never panics on malformed user
+config — bad files log a warning via `tracing` and fall back to defaults.

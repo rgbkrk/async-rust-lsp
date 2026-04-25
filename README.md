@@ -62,6 +62,15 @@ Flagged tokio primitives:
 
 The rule only flags calls in the *future-expression* position (LHS of `=>`). Calls inside an arm's handler block are fine — by the time the block runs, the arm has already won and won't be cancelled.
 
+**Project-local wrappers** — drop a `.async-rust-lsp.toml` next to your `Cargo.toml`:
+
+```toml
+[rules.cancel-unsafe-in-select]
+extra = ["recv_typed_frame", "send_typed_frame"]
+```
+
+The rule can't follow function bodies across files, so a wrapper that internally calls `read_exact` won't be flagged by default. List the wrapper names in `extra` and the rule will treat them like the built-in primitives. Built-in names listed in `extra` are deduplicated.
+
 Origin: nteract relay desync that surfaced as `frame too large: 1818192238 bytes` — four bytes of streaming kernel stdout reinterpreted as a length prefix. See [nteract/desktop#2182](https://github.com/nteract/desktop/pull/2182).
 
 ## Installation
