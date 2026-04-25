@@ -1,8 +1,8 @@
 [package]
 name = "async-rust-lsp"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
-description = "LSP server that detects tokio::sync::Mutex guards held across .await points — a pattern clippy misses"
+description = "LSP server for tokio async antipatterns: Mutex guards across .await points and cancel-unsafe futures inside select! arms"
 license = "MIT"
 repository = "https://github.com/rgbkrk/async-rust-lsp"
 homepage = "https://github.com/rgbkrk/async-rust-lsp"
